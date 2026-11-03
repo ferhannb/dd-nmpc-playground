@@ -96,7 +96,7 @@ function switchRunning(next) {
 
 function resetRun(params) {
   stopPlayback();
-  run = {parameters: params, applied: null, reference: null, waypoints: [], cycles: [], summary: null, initial: null, initialProgress: 0, length: 0};
+  run = {parameters: params, applied: null, reference: null, waypoints: [], cycles: [], summary: null, initial: null, initialProgress: 0, length: 0, diagnostics: [], lastStage: null};
   currentIndex = -1; followLive = true; zoom = 1; followCamera = true;
   $('scenarioLabel').textContent = `/ ${routeNames[params.route]}`;
   $('summaryRmse').textContent = '—'; $('summarySolve').textContent = '—'; $('summaryFallback').textContent = '—';
@@ -209,45 +209,65 @@ async function runBrowserSimulation() {
   resetRun(params);switchRunning(true);
   setStatus('Loading browser FATROP · WebAssembly…','active');
   browserSolverWorker?.terminate();
-  const worker=new Worker('./wasm/autonomous-worker.js?v=3');
+
+  const worker=new Worker('./wasm/autonomous-worker.js?v=cycle-diagnostics-1');
+
+
   browserSolverWorker=worker;
+  run.applied={...params,apply_policy:'first_shooting_interval'};
+  const applyCycle=item=>{
+    const beforeProgress=run.cycles.length?run.cycles.at(-1).progress_after_m:run.initialProgress;
+    const state=item.stateAfter;
+    handleEvent({type:'cycle',state_after:state,
+      progress_before_m:beforeProgress,progress_after_m:item.sigma_m,
+      elapsed_plant_time_s:item.elapsedPlantTime_s,
+      prediction_state_nodes:item.prediction_state_nodes||null,
+      optimized_block_commands:item.optimized_block_commands||null,
+      stage_distances_m:item.stage_distances_m||null,
+      block_map:item.block_map||null,
+      log:{sigma_m:item.sigma_m,ey_m:item.ey_m,
+        echi_deg:item.headingError_deg,V_mps:state[3],
+        delta_cmd_deg:item.commandRudder_deg,rpm_actual:state[7],
+        rudder_actual_deg:state[8],n_cmd_rpm:item.commandRpm,
+        solve_time_s:item.solveMs/1000,
+        first_shooting_interval_m:item.applyDistance_m,
+        apply_ds_m:item.applyDistance_m,S_H_m:item.horizon_m,
+        mode:'tracking',fallback_used:item.fallback,
+        solver_success:item.accepted,
+        solver_max_constraint_violation:item.constraintViolation}});
+    drawAll();
+  };
   worker.onmessage=({data})=>{
     if(data.type==='progress'){setStatus(data.message,'active');return;}
+    if(data.type==='stage'){
+      run.lastStage=data;
+      run.diagnostics.push(data);
+      setStatus(`Cycle ${data.cycle}/${data.total} · ${data.stage} · ${run.cycles.length} recorded`,'active');
+      return;
+    }
+    if(data.type==='initial'){
+      run.reference=data.referencePlot;
+      run.length=data.referenceLength_m;
+      run.initial=data.initialState;
+      run.initialProgress=data.initialProgress_m;
+      run.waypoints=data.waypoints||[];
+      $('waypointLegendLabel').textContent=`${data.waypointsAreNominal?'Nominal WPs':'WPs'} (${run.waypoints.length})`;
+      $('mapInfo').textContent=`${fmt(run.length/1000,2)} km reference · ${run.waypoints.length} WPs · WASM N=${params.N}, M=${params.M}`;
+      drawAll();return;
+    }
+    if(data.type==='cycle'){applyCycle(data.item);return;}
     worker.terminate();browserSolverWorker=null;switchRunning(false);
     if(data.type==='error'){
-      setStatus(data.message.split('\n')[0],'error');
+      const last=run.lastStage;
+      setStatus(`${data.message.split('\n')[0]} · ${run.cycles.length} recorded${last?` · last: cycle ${last.cycle} ${last.stage}`:''}`,'error');
       setConfigFeedback('Browser solve failed',data.message.split('\n')[0],'error');return;
     }
-    run.applied={...params,apply_policy:'first_shooting_interval'};
-    run.reference=data.referencePlot;
-    run.length=data.referenceLength_m;
-    run.initial=data.initialState;
-    run.initialProgress=data.trajectory[0]?.sigma_m||0;
-    run.waypoints=data.waypoints||[];
-    $('waypointLegendLabel').textContent=`${data.waypointsAreNominal?'Nominal WPs':'WPs'} (${run.waypoints.length})`;
-    $('mapInfo').textContent=`${fmt(run.length/1000,2)} km reference · ${run.waypoints.length} WPs · WASM N=${params.N}, M=${params.M}`;
-    for(const item of data.rows){
-      const prev=run.cycles.length?run.cycles.at(-1).state_after:run.initial;
-      const beforeProgress=run.cycles.length?run.cycles.at(-1).progress_after_m:run.initialProgress;
-      const state=item.stateAfter;
-      handleEvent({type:'cycle',state_after:state,
-        progress_before_m:beforeProgress,progress_after_m:item.sigma_m,
-        elapsed_plant_time_s:item.elapsedPlantTime_s,
-        prediction_state_nodes:item.prediction_state_nodes||null,
-        optimized_block_commands:item.optimized_block_commands||null,
-        stage_distances_m:item.stage_distances_m||null,
-        block_map:item.block_map||null,
-        log:{sigma_m:item.sigma_m,ey_m:item.ey_m,
-          echi_deg:item.headingError_deg,V_mps:state[3],
-          delta_cmd_deg:item.commandRudder_deg,rpm_actual:state[7],
-          rudder_actual_deg:state[8],n_cmd_rpm:item.commandRpm,
-          solve_time_s:item.solveMs/1000,
-          first_shooting_interval_m:item.applyDistance_m,
-          apply_ds_m:item.applyDistance_m,S_H_m:item.horizon_m,
-          mode:'tracking',fallback_used:item.fallback,
-          solver_success:item.accepted,
-          solver_max_constraint_violation:item.constraintViolation}});
+    if(!run.reference){
+      run.reference=data.referencePlot;run.length=data.referenceLength_m;
+      run.initial=data.initialState;run.initialProgress=data.trajectory[0]?.sigma_m||0;
+      run.waypoints=data.waypoints||[];
     }
+    if(!run.cycles.length)for(const item of data.rows)applyCycle(item);
     handleEvent({type:'complete',summary:{cycles:data.cyclesCompleted,
       cross_track_rmse_m:data.rmseEy_m,median_solver_time_s:data.medianSolveMs/1000,
       fallback_cycles:data.fallbackCount,stream_interrupted:data.termination!=='cycle_limit'}});
@@ -257,7 +277,7 @@ async function runBrowserSimulation() {
     drawAll();
   };
   worker.onerror=e=>{worker.terminate();browserSolverWorker=null;
-    switchRunning(false);setStatus(e.message||'Browser worker error','error');};
+    switchRunning(false);setStatus(`${e.message||'Browser worker error'} · ${run.cycles.length} recorded`,'error');};
   worker.postMessage({...params,cycles});
 }
 
@@ -603,6 +623,8 @@ function exportRun() {
     parameters: run.parameters, reference_xy_m: run.reference, initial_state: run.initial,
     waypoints: run.waypoints,
     cycles: run.cycles, summary: run.summary,
+    browser_diagnostics: run.diagnostics,
+    last_worker_stage: run.lastStage,
   };
   const blob = new Blob([JSON.stringify(report,null,2)],{type:'application/json'});
   const url=URL.createObjectURL(blob),link=document.createElement('a');
@@ -627,7 +649,9 @@ $('runBtn').addEventListener('click',runSimulation);
 $('stopBtn').addEventListener('click',()=>{
   abortController?.abort();
   if(browserSolverWorker){browserSolverWorker.terminate();browserSolverWorker=null;
-    switchRunning(false);setStatus(`Stopped · ${run.cycles.length} recorded cycles`);}
+    switchRunning(false);
+    const last=run.lastStage;
+    setStatus(`Stopped · ${run.cycles.length} recorded cycles${last?` · last: cycle ${last.cycle} ${last.stage}`:''}`);}
 });
 $('engine').addEventListener('change',setEngineMode);
 $('exportBtn').addEventListener('click',exportRun);

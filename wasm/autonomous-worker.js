@@ -119,6 +119,10 @@ async function runNative(options){
     current_north_mps:options.current_north_mps}};
   const initialState=state.slice();
   let sigma=project(state[0],state[1],ref,null);
+  postMessage({type:'initial',initialState:initialState.slice(),initialProgress_m:sigma,
+    referencePlot:Array.from({length:301},(_,i)=>sample(ref.length*i/300,ref)),
+    referenceLength_m:ref.length,waypoints:fixture.waypoints||[],
+    waypointsAreNominal:Boolean(fixture.waypointsAreNominal)});
   let uprev=[state[7],state[8]];
   let guess=fixture.attempts[0].x0.slice();
   for(let i=0;i<9;i++)guess[i]=state[i]/stateScaling[i];
@@ -130,14 +134,20 @@ async function runNative(options){
   let termination='cycle_limit';
   for(let cycle=0;cycle<maxCycles;cycle++){
     if(ref.length-sigma<=runtime.arrival_m){termination='arrival';break;}
-    postMessage({type:'progress',message:`Browser-native NMPC cycle ${cycle+1}/${maxCycles}`});
+    const stage=(name,extra={})=>postMessage({type:'stage',cycle:cycle+1,total:maxCycles,
+      stage:name,sigma_m:sigma,rpm_actual:state[7],...extra});
+    stage('reference projection');
     const controlSigma=project(state[0],state[1],ref,sigma,
       windows.backwardWindow_m,windows.forwardWindow_m);
     const projected=project(state[0],state[1],ref,controlSigma);
     let horizon;
+    stage('horizon generation');
     try{horizon=horizonFor(ref,projected,config);}
     catch(e){termination='horizon_infeasible';break;}
-    const parameters=[...state,...horizon.ds,...horizon.nodes,...uprev,options.rpm * fixture.plant.coefficients.kV0];
+    stage('constraint assembly',{horizon_m:horizon.nodes.at(-1)-horizon.nodes[0]});
+    const parameters=[...state,...horizon.ds,...horizon.nodes,...uprev,
+      options.rpm*fixture.plant.coefficients.kV0];
+
     const bounds=boundsFn.call({p:ca.DM(parameters)});
     const rawL=bounds.lbg.nonzeros(),rawU=bounds.ubg.nonzeros();
     const low=ca.DM(rawL.map(numberBounds)),high=ca.DM(rawU.map(numberBounds));
@@ -152,7 +162,9 @@ async function runNative(options){
         violation:maxViolation(evaluated.g.nonzeros(),rawL,rawU)};
     };
     let candidate=null;
+    stage('FATROP solve',{vref_mps:parameters.at(-1),previous_command:uprev.slice()});
     try{candidate=attempt(guess);}catch(e){failedSolveCount++;}
+    stage('candidate acceptance',{solve_ms:solveMs});
     const acceptable=c=>c&&maxFinite(c.vars)&&maxFinite(c.commands)&&
       Number.isFinite(c.cost)&&c.violation<=tolerance;
     if(!acceptable(candidate)){
@@ -178,6 +190,7 @@ async function runNative(options){
     const ds=Math.min(horizon.ds[0],ref.length-sigma,accepted?Infinity:fallbackMax);
     if(!(ds>0)){termination='nonpositive_apply_distance';break;}
     let plant;
+    stage('plant propagation',{command:cmd.slice(),apply_distance_m:ds});
     try{plant=propagate(state,cmd,ds,physicalPlant,sigma,.1);}
     catch(e){termination='plant_guard: '+String(e);break;}
     state=plant.state;
@@ -195,6 +208,7 @@ async function runNative(options){
       horizon_m:horizon.nodes.at(-1)-horizon.nodes[0],
       initialProgress_m:horizon.nodes[0],
       ...(prediction||{})});
+    postMessage({type:'cycle',item:rows.at(-1)});
     trajectory.push({cycle:cycle+1,x:state[0],y:state[1],sigma_m:sigma});
     if((cycle+1)%10===0)postMessage({type:'progress',message:`${cycle+1} cycles: ${acceptedCount} accepted, ${fallbackCount} fallback`});
   }
