@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Panamax / DD-NMPC Lab</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script defer src="./app.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand"><div class="brand-mark">◈</div><div><span class="eyebrow">MARINE AUTONOMY / RESEARCH TOOL</span><strong>PANAMAX <em>DD-NMPC</em></strong></div></div>
+      <div class="top-center"><span class="pill pill-outline">CASADI + FATROP</span><span class="pill pill-outline">DISTANCE DOMAIN</span><span class="pill pill-green">● BROWSER WEBASSEMBLY</span></div>
+      <div class="top-actions"><button id="exportBtn" class="btn btn-ghost" disabled>↧ Export run</button><button id="runBtn" class="btn btn-primary"><span>▶</span> Apply &amp; run</button><button id="stopBtn" class="btn btn-danger hidden">■ Stop</button></div>
+    </header>
+
+    <main class="workspace">
+      <aside class="settings-panel">
+        <div class="section-heading"><span>01</span><div><h2>Simulation setup</h2><p>Change the OCP and initial conditions</p></div></div>
+        <div id="configFeedback" class="config-feedback"><span class="feedback-dot"></span><div><strong id="configFeedbackTitle">Ready to configure</strong><p id="configFeedbackText">Select values, then click Apply &amp; run.</p></div></div>
+        <div class="group"><label for="engine">SOLVER EXECUTION</label>
+          <select id="engine" disabled><option value="wasm" selected>WebAssembly · Browser FATROP (compiled N/M presets)</option></select>
+          <div class="route-hint" id="engineHint">Runs entirely in your browser. The first run downloads the CasADi WebAssembly runtime.</div>
+        </div>
+        <div class="group">
+          <label for="route">REFERENCE GEOMETRY</label>
+          <select id="route"><option value="straight">01 / Straight passage</option><option value="s_curve">02 / Multi-waypoint S-curve</option><option value="complex" selected>03 / Complex harbour route</option></select>
+          <div class="route-hint" id="routeHint">≈ 14.2 km · Smoothed harbour waypoints</div>
+        </div>
+        <div class="group group-border">
+          <div class="group-title">PREDICTION HORIZON <span>SPATIAL MPC</span></div>
+          <div class="control-grid">
+            <div class="input-wrap"><label for="N">SHOOTING STAGES <i>N</i></label><input type="number" id="N" value="8" min="4" max="30" step="1"></div>
+            <div class="input-wrap"><label for="M">CONTROL BLOCKS <i>M</i></label><input type="number" id="M" value="4" min="1" max="10" step="1"></div>
+          </div>
+          <div class="input-wrap"><label for="horizon_m">MAX HORIZON <i>S<sub>H</sub> [m]</i></label><input type="number" id="horizon_m" value="1500" min="150" max="2500" step="50"></div>
+          <div class="hint-note">Applied distance each cycle = first shooting interval <strong>Δs₀</strong>, subject to the existing fallback cap.</div>
+        </div>
+        <div class="group group-border">
+          <div class="group-title">VESSEL INITIAL STATE <span>MANEVRA MODEL</span></div>
+          <div class="control-grid">
+            <div class="input-wrap"><label for="rpm">TARGET / INITIAL RPM</label><input type="number" id="rpm" value="60" min="20" max="100" step="5"></div>
+            <div class="input-wrap"><label for="max_cycles">MAX CYCLES</label><input type="number" id="max_cycles" value="100" min="1" max="160" step="5"></div>
+          </div>
+          <div class="input-wrap"><label for="cross_track_m">INITIAL CROSS-TRACK ERROR <i>e<sub>y</sub> [m]</i></label><div class="range-line"><input id="cross_track_slider" type="range" min="-150" max="150" value="10" step="5"><input type="number" id="cross_track_m" min="-350" max="350" value="10" step="5"></div></div>
+          <div class="input-wrap"><label for="heading_error_deg">INITIAL HEADING ERROR <i>[deg]</i></label><div class="range-line"><input id="heading_slider" type="range" min="-45" max="45" value="2" step="1"><input type="number" id="heading_error_deg" min="-60" max="60" value="2"></div></div>
+        </div>
+        <div class="group group-border">
+          <div class="group-title">ENVIRONMENT <span>PLANT ONLY</span></div>
+          <div class="control-grid">
+            <div class="input-wrap"><label for="current_east_mps">CURRENT EAST [m/s]</label><input id="current_east_mps" type="number" value="0" min="-2" max="2" step="0.1"></div>
+            <div class="input-wrap"><label for="current_north_mps">CURRENT NORTH [m/s]</label><input id="current_north_mps" type="number" value="0" min="-2" max="2" step="0.1"></div>
+          </div>
+          <div class="hint-note">The current perturbs the simulation plant. The NMPC prediction remains nominal.</div>
+        </div>
+        <div class="sidebar-foot"><span class="small-dot"></span><div><strong>Model-in-the-loop demonstration</strong><p>Numerical plant and predictor share nominal dynamics; not sea-trial validation.</p></div></div>
+      </aside>
+
+      <section class="main-column">
+        <div class="view-head"><div><div class="view-kicker">02 / TRAJECTORY VIEWER</div><h1>Closed-loop navigation <span id="scenarioLabel">/ Complex harbour route</span></h1></div><div class="live-pill"><span class="live-light" id="liveLight"></span><span id="statusText">Ready to simulate</span></div></div>
+        <div class="map-card" id="mapCard">
+          <div class="map-toolbar"><div class="map-legend"><span><i class="legend-line legend-route"></i> Reference path</span><span><i class="legend-line legend-truth"></i> Plant trajectory</span><span><i class="legend-line legend-pred"></i> MPC prediction</span><label class="wp-legend" title="Show or hide original scenario waypoint coordinates"><input type="checkbox" id="showWaypoints" checked><i class="wp-symbol"></i><span id="waypointLegendLabel">WPs</span></label></div><div class="map-controls"><span>N ↑</span><button id="zoomOut" title="Zoom out">−</button><button id="zoomFit" title="Fit whole reference">Fit</button><button id="zoomIn" title="Zoom in">+</button><div class="map-height-control" aria-label="Adjust map height"><button id="mapHeightDown" title="Reduce map height">−</button><span id="mapHeightLabel">205 px</span><button id="mapHeightUp" title="Increase map height">+</button></div><button id="toggleMapSize" class="map-size-btn" aria-pressed="false" title="Enlarge the X-Y map">Expand map</button></div></div>
+          <div class="map-viewport"><canvas id="mapCanvas" aria-label="Reference path and Panamax trajectory map"></canvas><div class="map-overlay"><span class="small-dot"></span> <span id="mapInfo">Awaiting reference</span></div><div class="map-corner">PANAMAX · 2D PLAN VIEW <span>SHIP ICON NOT TO SCALE</span></div></div>
+          <div class="playback-bar"><button id="prevBtn" class="icon-btn" aria-label="Previous control cycle" disabled>‹</button><button id="playBtn" class="icon-btn play-btn" aria-label="Play or pause replay" disabled>▶</button><button id="nextBtn" class="icon-btn" aria-label="Next control cycle" disabled>›</button><div class="seek-wrap"><div class="seek-label"><span>REPLAY CONTROL CYCLES</span><span id="seekText">0 / 0</span></div><input type="range" id="timeline" min="0" max="0" step="1" value="0" disabled></div><div class="playback-speed" id="timeInfo">t = 0 s</div></div>
+        </div>
+        <div class="chart-row">
+          <div class="chart-card" id="errorCard"><div class="chart-heading"><div><span>03 / TRACKING ACCURACY</span><strong>Cross-track error <em>e<sub>y</sub></em></strong></div><div class="chart-tools"><span class="chart-unit">METRES</span><div class="chart-resize" data-chart="error" aria-label="Adjust cross-track plot height"><button data-step="-40" aria-label="Reduce cross-track plot height">−</button><span id="errorHeightLabel">165 px</span><button data-step="40" aria-label="Increase cross-track plot height">+</button></div></div></div><canvas id="errorCanvas"></canvas><div class="plot-legend"><span><i class="linekey actual-key"></i> Cross-track error</span><span><i class="linekey zero-key"></i> Zero-error reference</span><span><i class="linekey now-linekey"></i> NOW</span></div></div>
+          <div class="chart-card" id="rudderCard"><div class="chart-heading"><div><span>04 / INPUT · NOW + HORIZON</span><strong>Rudder <em>δ</em> · command / actual</strong></div><div class="chart-tools"><span class="chart-unit">DEGREES</span><div class="chart-resize" data-chart="rudder" aria-label="Adjust rudder plot height"><button data-step="-40" aria-label="Reduce rudder plot height">−</button><span id="rudderHeightLabel">260 px</span><button data-step="40" aria-label="Increase rudder plot height">+</button></div></div></div><canvas id="commandCanvas"></canvas><div class="plot-legend"><span><i class="linekey actual-key"></i> Actual</span><span><i class="linekey command-key"></i> Command</span><span><i class="linekey future-command-key"></i> Future command</span><span><i class="linekey predicted-key"></i> Predicted actual</span><span><i class="linekey now-linekey"></i> NOW</span></div></div>
+          <div class="chart-card" id="rpmCard"><div class="chart-heading"><div><span>05 / INPUT · NOW + HORIZON</span><strong>Propeller <em>RPM</em> · target / actual</strong></div><div class="chart-tools"><span class="chart-unit">RPM</span><div class="chart-resize" data-chart="rpm" aria-label="Adjust RPM plot height"><button data-step="-40" aria-label="Reduce RPM plot height">−</button><span id="rpmHeightLabel">260 px</span><button data-step="40" aria-label="Increase RPM plot height">+</button></div></div></div><canvas id="rpmCanvas"></canvas><div class="plot-legend"><span><i class="linekey actual-key"></i> Actual</span><span><i class="linekey command-key"></i> Command</span><span><i class="linekey future-command-key"></i> Future command</span><span><i class="linekey predicted-key"></i> Predicted actual</span><span><i class="linekey reference-key"></i> Reference RPM</span><span><i class="linekey now-linekey"></i> NOW</span></div></div>
+        </div>
+        <div class="chart-footnote" id="forecastNote">NOW = state after first applied stage. Forecasts show the remaining stages of the last accepted MPC solution; future shooting-distance coordinates and predicted actuator states are model outputs, not measurements.</div>
+      </section>
+
+      <aside class="telemetry-panel">
+        <div class="section-heading telemetry-title"><span>05</span><div><h2>Live telemetry</h2><p>Selected solver iteration</p></div></div>
+        <div class="metric-card primary-metric"><div class="metric-name">CROSS-TRACK ERROR <span>e<sub>y</sub></span></div><div class="metric-number" id="metricEy">—<small>m</small></div><div class="metric-sub">Relative to projected reference</div></div>
+        <div class="metric-grid"><div class="metric-mini"><span>HEADING ERROR</span><strong id="metricHeading">—</strong><small>deg</small></div><div class="metric-mini"><span>VESSEL SPEED</span><strong id="metricSpeed">—</strong><small>m/s</small></div><div class="metric-mini"><span>RUDDER CMD</span><strong id="metricRudder">—</strong><small>deg</small></div><div class="metric-mini"><span>ACTUAL RPM</span><strong id="metricRpm">—</strong><small>rpm</small></div></div>
+        <div class="section-mini">SOLVER DIAGNOSTICS <span>PER CYCLE</span></div>
+        <div class="diagnostic"><span>Optimisation time</span><strong id="metricSolver">— ms</strong></div>
+        <div class="diagnostic"><span>First shooting Δs₀</span><strong class="accent" id="metricDs">— m</strong></div>
+        <div class="diagnostic"><span>Applied plant distance</span><strong id="metricApplied">— m</strong></div>
+        <div class="diagnostic"><span>Prediction horizon</span><strong id="metricHorizon">— m</strong></div>
+        <div class="diagnostic"><span>NMPC mode</span><strong id="metricMode">—</strong></div>
+        <div class="diagnostic"><span>Solver status</span><strong id="metricStatus">—</strong></div>
+        <div class="diagnostic"><span>Constraint violation</span><strong id="metricViolation">—</strong></div>
+        <div class="section-mini summary-heading">RUN PERFORMANCE</div>
+        <div class="summary-box"><div><span>RMSE · CROSS-TRACK</span><strong id="summaryRmse">—</strong></div><div><span>MEDIAN SOLVE TIME</span><strong id="summarySolve">—</strong></div><div><span>FALLBACK CYCLES</span><strong id="summaryFallback">—</strong></div></div>
+        <div class="result-state" id="resultState">Change parameters and run to compare vessel behavior.</div>
+      </aside>
+    </main>
+    <footer class="footer"><span>PANAMAX DD-NMPC LAB · PUBLIC RESEARCH DEMO</span><span>REFERENCE / OPTIMISED PREDICTION / SIMULATED PLANT ARE DISTINCT · NOT CERTIFIED</span><span>All distances in metres</span></footer>
+  </div>
+</body>
+</html>
