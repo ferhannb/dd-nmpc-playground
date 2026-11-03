@@ -137,7 +137,7 @@ async function runNative(options){
     let horizon;
     try{horizon=horizonFor(ref,projected,config);}
     catch(e){termination='horizon_infeasible';break;}
-    const parameters=[...state,...horizon.ds,...horizon.nodes,...uprev,options.rpm];
+    const parameters=[...state,...horizon.ds,...horizon.nodes,...uprev,options.rpm * fixture.plant.coefficients.kV0];
     const bounds=boundsFn.call({p:ca.DM(parameters)});
     const rawL=bounds.lbg.nonzeros(),rawU=bounds.ubg.nonzeros();
     const low=ca.DM(rawL.map(numberBounds)),high=ca.DM(rawU.map(numberBounds));
