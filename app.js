@@ -209,7 +209,7 @@ async function runBrowserSimulation() {
   resetRun(params);switchRunning(true);
   setStatus('Loading browser FATROP · WebAssembly…','active');
   browserSolverWorker?.terminate();
-  const worker=new Worker('./wasm/autonomous-worker.js');
+  const worker=new Worker('./wasm/autonomous-worker.js?v=3');
   browserSolverWorker=worker;
   worker.onmessage=({data})=>{
     if(data.type==='progress'){setStatus(data.message,'active');return;}
