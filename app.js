@@ -75,7 +75,7 @@ function parameterValues() {
     if(![[8,2],[8,4],[12,4]].some(([n,m])=>data.N===n&&data.M===m))
       throw new Error('WASM graph supports only N/M = 8/2, 8/4 or 12/4');
     for(const [key,minimum,maximum] of [
-      ['max_cycles',1,100],['horizon_m',600,1500],['rpm',40,90],
+      ['max_cycles',1,100],['horizon_m',600,1500],['rpm',40,100],
       ['cross_track_m',-100,100],['heading_error_deg',-30,30],
       ['current_east_mps',-1,1],['current_north_mps',-1,1]]){
       if(data[key]<minimum||data[key]>maximum)throw new Error(`${key}: browser bounds ${minimum} to ${maximum}`);

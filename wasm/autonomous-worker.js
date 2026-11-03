@@ -220,7 +220,7 @@ self.onmessage=({data})=>{
     heading_error_deg:Number(data?.heading_error_deg??2),
     current_east_mps:Number(data?.current_east_mps??0),
     current_north_mps:Number(data?.current_north_mps??0)};
-  const limits=[['cycles',1,100],['horizon_m',600,1500],['rpm',40,90],
+  const limits=[['cycles',1,100],['horizon_m',600,1500],['rpm',40,100],
     ['cross_track_m',-100,100],['heading_error_deg',-30,30],
     ['current_east_mps',-1,1],['current_north_mps',-1,1]];
   if(limits.some(([k,lo,hi])=>!Number.isFinite(options[k])||options[k]<lo||options[k]>hi)||
